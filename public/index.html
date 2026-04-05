@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SOUNDWORLD</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      color: white;
+    }
+
+    #canvas-container {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+    }
+
+    #ui {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #crosshair {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.7);
+      box-shadow: 0 0 8px rgba(255,255,255,0.9), 0 0 20px rgba(255,255,255,0.3);
+    }
+
+    #world-label {
+      position: absolute;
+      top: 22px; left: 24px;
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,0.25);
+      text-transform: uppercase;
+    }
+
+    #new-world-btn {
+      position: absolute;
+      top: 40px; left: 24px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.22);
+      font-family: 'Courier New', monospace;
+      font-size: 9px;
+      letter-spacing: 2px;
+      padding: 4px 10px;
+      cursor: pointer;
+      pointer-events: all;
+      transition: all 0.2s;
+    }
+    #new-world-btn:hover {
+      border-color: rgba(255,255,255,0.45);
+      color: rgba(255,255,255,0.7);
+    }
+
+    #players-panel {
+      position: absolute;
+      top: 18px; right: 22px;
+      text-align: right;
+      font-size: 10px;
+      letter-spacing: 2px;
+      line-height: 1.8;
+    }
+
+    #player-count {
+      color: rgba(255,255,255,0.25);
+    }
+
+    #local-player-name {
+      font-size: 11px;
+    }
+
+    #controls-hint {
+      position: absolute;
+      bottom: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,0.2);
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    #keys-row {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 5px;
+    }
+
+    .key-btn {
+      width: 28px; height: 28px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Courier New', monospace;
+      font-size: 9px;
+      letter-spacing: 0;
+      color: rgba(255,255,255,0.25);
+      transition: all 0.08s ease;
+      user-select: none;
+    }
+
+    .key-btn.active {
+      background: rgba(255,255,255,0.25);
+      border-color: rgba(255,255,255,0.7);
+      color: white;
+      box-shadow: 0 0 12px rgba(255,255,255,0.4);
+    }
+
+    /* OVERLAY */
+    #overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at center, #0a0018 0%, #000 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      pointer-events: all;
+    }
+
+    #overlay h1 {
+      font-size: 52px;
+      letter-spacing: 18px;
+      margin-bottom: 12px;
+      color: white;
+      text-shadow: 0 0 40px rgba(150,80,255,0.8), 0 0 80px rgba(150,80,255,0.3);
+    }
+
+    #overlay .subtitle {
+      font-size: 11px;
+      letter-spacing: 4px;
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 5px;
+    }
+
+    #overlay .subtitle-2 {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,0.2);
+      margin-bottom: 50px;
+    }
+
+    #start-btn {
+      padding: 14px 52px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.8);
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      letter-spacing: 6px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-transform: uppercase;
+    }
+
+    #start-btn:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.6);
+      color: white;
+      box-shadow: 0 0 30px rgba(150,80,255,0.3);
+    }
+
+    .instructions {
+      margin-top: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 30px;
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: rgba(255,255,255,0.18);
+      text-align: left;
+    }
+
+    #status-msg {
+      position: fixed;
+      bottom: 50%;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,0.4);
+      z-index: 200;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="ui">
+  <div id="crosshair"></div>
+  <div id="world-label"></div>
+  <button id="new-world-btn">⟳ NUEVO MUNDO</button>
+  <div id="players-panel">
+    <div id="player-count">— / 8</div>
+    <div id="local-player-name"></div>
+  </div>
+  <div id="controls-hint">
+    WASD · MOVER &nbsp;&nbsp;&nbsp; ESPACIO / SHIFT · SUBIR / BAJAR &nbsp;&nbsp;&nbsp; 1–0 · TOCAR &nbsp;&nbsp;&nbsp; R · ALEATORIZAR &nbsp;&nbsp;&nbsp; N · NUEVO MUNDO
+  </div>
+  <div id="keys-row">
+    <div class="key-btn" id="kbtn-1">1</div>
+    <div class="key-btn" id="kbtn-2">2</div>
+    <div class="key-btn" id="kbtn-3">3</div>
+    <div class="key-btn" id="kbtn-4">4</div>
+    <div class="key-btn" id="kbtn-5">5</div>
+    <div class="key-btn" id="kbtn-6">6</div>
+    <div class="key-btn" id="kbtn-7">7</div>
+    <div class="key-btn" id="kbtn-8">8</div>
+    <div class="key-btn" id="kbtn-9">9</div>
+    <div class="key-btn" id="kbtn-0">0</div>
+  </div>
+</div>
+
+<div id="overlay">
+  <h1>SOUNDWORLD</h1>
+  <p class="subtitle">UN PAISAJE SONORO MULTIJUGADOR</p>
+  <p class="subtitle-2">HASTA 8 JUGADORES · CADA UNO ES UN SONIDO EN EL ESPACIO</p>
+  <button id="start-btn" onclick="startGame()">ENTRAR AL MUNDO</button>
+  <div class="instructions">
+    <span>WASD — MOVERSE</span>
+    <span>1-0 — TOCAR NOTAS</span>
+    <span>ESPACIO — SUBIR</span>
+    <span>SHIFT — BAJAR</span>
+    <span>CLIC — CAPTURAR RATÓN</span>
+    <span>ESC — LIBERAR RATÓN</span>
+    <span>R — ALEATORIZAR SONIDO</span>
+    <span>N — NUEVO MUNDO</span>
+  </div>
+</div>
+
+<div id="status-msg">CONECTANDO...</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/resonance-audio/build/resonance-audio.min.js"></script>
+<script src="audio.js"></script>
+<script src="world.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
