@@ -23,6 +23,7 @@ let worldGen = null;
 let socket = null;
 let localPlayer = null;       // { id, index }
 let playerMeshes = new Map(); // id -> THREE.Mesh
+let isAdmin = false;
 
 const audio = new AudioSystem();
 const keys = {};
@@ -33,10 +34,14 @@ let lastNetSend = 0;
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 function startGame() {
+  const aliasInput = document.getElementById('alias-input');
+  const alias = (aliasInput ? aliasInput.value.trim() : '') || 'ANÓNIMO';
+  const adminKey = new URLSearchParams(window.location.search).get('admin') || '';
   document.getElementById('overlay').style.display = 'none';
   _initThree();
   _initInput();
-  _initNetwork();
+  _initNetwork(alias, adminKey);
+  _initReverbPanel();
   _animate();
 }
 
@@ -97,8 +102,8 @@ function _initInput() {
       _showRandomizeToast(params);
     }
 
-    // N — request new world (regenerates for everyone in the room)
-    if (k === 'n' && socket && !e.repeat) {
+    // N — request new world (admin only)
+    if (k === 'n' && isAdmin && socket && !e.repeat) {
       socket.emit('requestNewWorld');
     }
 
@@ -147,14 +152,14 @@ function _initInput() {
 
 // ─── Network ──────────────────────────────────────────────────────────────────
 
-function _initNetwork() {
-  socket = io();
+function _initNetwork(alias, adminKey) {
+  socket = io({ query: { alias, adminKey } });
 
-  // Botón nuevo mundo — se conecta aquí donde socket ya existe
+  // Botón nuevo mundo — solo para admin
   const newWorldBtn = document.getElementById('new-world-btn');
   if (newWorldBtn) {
     newWorldBtn.addEventListener('click', () => {
-      console.log('[game] requesting new world...');
+      if (!isAdmin) return;
       socket.emit('requestNewWorld');
     });
   }
@@ -178,6 +183,8 @@ function _initNetwork() {
 
     // Set local player (index = visual color slot, synthIndex = audio profile)
     localPlayer = { id: data.playerId, index: data.playerIndex, synthIndex: data.playerSynthIndex };
+    isAdmin = !!data.isAdmin;
+    _applyAdminUI();
 
     // Spawn somewhere random
     camera.position.set(
@@ -236,6 +243,20 @@ function _initNetwork() {
     }
   });
 
+  // Admin-broadcast reverb changes — apply on all non-admin clients
+  const _reverbApply = {
+    lDecay:    v => audio.setLocalReverbDecay(v),
+    lWet:      v => audio.setLocalReverbWet(v),
+    lDry:      v => audio.setLocalReverbDry(v),
+    sDecay:    v => audio.setSpatialReverbDecay(v),
+    sWet:      v => audio.setSpatialReverbWet(v),
+    sDry:      v => audio.setSpatialReverbDry(v),
+    masterGain:v => audio.setMasterGain(v),
+  };
+  socket.on('applyReverb', ({ param, value }) => {
+    if (_reverbApply[param]) _reverbApply[param](value);
+  });
+
   socket.on('playerSound', (data) => {
     // noteoff — no need for mesh, just kill by id+key
     if (data.action === 'stop') {
@@ -250,6 +271,39 @@ function _initNetwork() {
       mesh.position.x, mesh.position.y, mesh.position.z
     );
   });
+}
+
+// ─── Alias sprite ─────────────────────────────────────────────────────────────
+
+function _createAliasSprite(alias, color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 80;
+  const ctx = canvas.getContext('2d');
+
+  // Measure text first to size background
+  ctx.font = 'bold 32px monospace';
+  const textW = ctx.measureText(alias).width;
+  const pad = 24;
+
+  // Background pill
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  const rx = (512 - textW - pad * 2) / 2;
+  ctx.beginPath();
+  ctx.roundRect(rx, 16, textW + pad * 2, 48, 10);
+  ctx.fill();
+
+  // Text in player color
+  const hex = '#' + color.toString(16).padStart(6, '0');
+  ctx.fillStyle = hex;
+  ctx.textAlign = 'center';
+  ctx.fillText(alias, 256, 52);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(3.2, 0.5, 1);
+  sprite.position.set(0, 1.4, 0); // above the sphere
+  return sprite;
 }
 
 // ─── Player management ────────────────────────────────────────────────────────
@@ -272,6 +326,11 @@ function _spawnPlayer(player) {
   orb.position.set(player.x, player.y, player.z);
   orb.userData.playerIndex = player.index;
   orb.userData.synthIndex  = player.synthIndex !== undefined ? player.synthIndex : player.index;
+
+  // Alias label floating above the orb
+  const aliasText = (player.alias || 'ANÓNIMO').toUpperCase();
+  const sprite = _createAliasSprite(aliasText, color);
+  orb.add(sprite);
   orb.userData.targetX = player.x;
   orb.userData.targetY = player.y;
   orb.userData.targetZ = player.z;
@@ -330,6 +389,52 @@ function _updateHUD() {
     const scale = audio.currentScaleName ? ` · ${audio.currentScaleName}` : '';
     nameEl.innerHTML = `<span style="color:${hex}">● ${color} · ${synth}${scale}</span>`;
   }
+}
+
+// ─── Admin UI ────────────────────────────────────────────────────────────────
+
+function _applyAdminUI() {
+  const btn = document.getElementById('new-world-btn');
+  if (btn) btn.style.display = isAdmin ? 'block' : 'none';
+  if (isAdmin) console.log('[★] Admin mode active');
+}
+
+// ─── Reverb panel ────────────────────────────────────────────────────────────
+
+function _initReverbPanel() {
+  if (!isAdmin) return; // Only admin can control reverb
+
+  const panel = document.getElementById('reverb-panel');
+  if (!panel) return;
+
+  // TAB toggles panel visibility
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      panel.classList.toggle('visible');
+    }
+  });
+
+  function wire(id, valId, fn, suffix = '') {
+    const el = document.getElementById(id);
+    const vl = document.getElementById(valId);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      const v = parseFloat(el.value);
+      vl.textContent = v.toFixed(2) + suffix;
+      fn(v);
+      // Broadcast to all other players in the room
+      if (socket) socket.emit('adminSetReverb', { param: id, value: v });
+    });
+  }
+
+  wire('lDecay',    'lDecayVal',  v => audio.setLocalReverbDecay(v),   's');
+  wire('lWet',      'lWetVal',    v => audio.setLocalReverbWet(v));
+  wire('lDry',      'lDryVal',    v => audio.setLocalReverbDry(v));
+  wire('sDecay',    'sDecayVal',  v => audio.setSpatialReverbDecay(v), 's');
+  wire('sWet',      'sWetVal',    v => audio.setSpatialReverbWet(v));
+  wire('sDry',      'sDryVal',    v => audio.setSpatialReverbDry(v));
+  wire('masterGain','masterVal',  v => audio.setMasterGain(v));
 }
 
 // ─── Randomize toast ─────────────────────────────────────────────────────────

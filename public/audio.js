@@ -44,27 +44,33 @@ class AudioSystem {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       try { await this.ctx.resume(); } catch(e) {}
 
-      // ── Local notes bus: always present, no external deps ──
-      const lRev = this._makeReverb(1.2);
-      const lDry = this.ctx.createGain(); lDry.gain.value = 0.62;
-      const lWet = this.ctx.createGain(); lWet.gain.value = 0.38;
-      this.localBus = this.ctx.createGain(); this.localBus.gain.value = 0.70;
-      this.localBus.connect(lDry); lDry.connect(this.ctx.destination);
-      this.localBus.connect(lRev); lRev.connect(lWet); lWet.connect(this.ctx.destination);
+      // ── Local notes bus ──
+      this.localReverbDecay = 1.2;
+      this.localConv  = this._makeReverb(this.localReverbDecay);
+      this.localDry   = this.ctx.createGain(); this.localDry.gain.value  = 0.62;
+      this.localWet   = this.ctx.createGain(); this.localWet.gain.value  = 0.38;
+      this.localBus   = this.ctx.createGain(); this.localBus.gain.value  = 0.70;
+      this.localBus.connect(this.localDry); this.localDry.connect(this.ctx.destination);
+      this.localBus.connect(this.localConv); this.localConv.connect(this.localWet);
+      this.localWet.connect(this.ctx.destination);
 
-      // ── Spatial bus for remote notes (HRTF fallback always available) ──
-      const rev = this._makeReverb(3.5);
-      const dry = this.ctx.createGain(); dry.gain.value = 0.55;
-      const wet = this.ctx.createGain(); wet.gain.value = 0.45;
-      this.notesBus = this.ctx.createGain(); this.notesBus.gain.value = 0.72;
-      this.notesBus.connect(dry); dry.connect(this.ctx.destination);
-      this.notesBus.connect(rev); rev.connect(wet); wet.connect(this.ctx.destination);
+      // ── Spatial bus (HRTF fallback + shared reverb for remote notes) ──
+      this.spatialReverbDecay = 3.5;
+      this.spatialConv = this._makeReverb(this.spatialReverbDecay);
+      this.spatialDry  = this.ctx.createGain(); this.spatialDry.gain.value  = 0.55;
+      this.spatialWet  = this.ctx.createGain(); this.spatialWet.gain.value  = 0.45;
+      this.notesBus    = this.ctx.createGain(); this.notesBus.gain.value    = 0.72;
+      this.notesBus.connect(this.spatialDry); this.spatialDry.connect(this.ctx.destination);
+      this.notesBus.connect(this.spatialConv); this.spatialConv.connect(this.spatialWet);
+      this.spatialWet.connect(this.ctx.destination);
 
       // ── Resonance Audio (optional enhancement — doesn't block init) ──
       try {
         if (typeof ResonanceAudio !== 'undefined') {
           this.resonance = new ResonanceAudio(this.ctx, { ambisonicOrder: 1 });
+          // Resonance output → dry path + shared reverb tail
           this.resonance.output.connect(this.ctx.destination);
+          this.resonance.output.connect(this.spatialConv);
           this.setWorldType(0);
           console.log('[audio] Resonance Audio OK');
         } else {
@@ -146,6 +152,58 @@ class AudioSystem {
   }
 
   // ── Utilities ─────────────────────────────────────────────────────────────
+
+  // ── Reverb controls (llamados desde el panel de debug) ───────────────────
+
+  setLocalReverbDecay(seconds) {
+    if (!this.initialized) return;
+    this.localReverbDecay = seconds;
+    this.localConv.disconnect();
+    this.localConv = this._makeReverb(seconds);
+    this.localBus.connect(this.localConv);
+    this.localConv.connect(this.localWet);
+  }
+
+  setLocalReverbWet(value) {
+    if (!this.initialized) return;
+    this.localWet.gain.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+  }
+
+  setLocalReverbDry(value) {
+    if (!this.initialized) return;
+    this.localDry.gain.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+  }
+
+  setSpatialReverbDecay(seconds) {
+    if (!this.initialized) return;
+    this.spatialReverbDecay = seconds;
+    this.spatialConv.disconnect();
+    this.spatialConv = this._makeReverb(seconds);
+    this.notesBus.connect(this.spatialConv);
+    this.spatialConv.connect(this.spatialWet);
+    // Also feed Resonance Audio output through spatial reverb
+    if (this.resonance) {
+      this.resonance.output.disconnect();
+      this.resonance.output.connect(this.ctx.destination);
+      this.resonance.output.connect(this.spatialConv);
+    }
+  }
+
+  setSpatialReverbWet(value) {
+    if (!this.initialized) return;
+    this.spatialWet.gain.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+  }
+
+  setSpatialReverbDry(value) {
+    if (!this.initialized) return;
+    this.spatialDry.gain.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+  }
+
+  setMasterGain(value) {
+    if (!this.initialized) return;
+    this.localBus.gain.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+    this.notesBus.gain.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+  }
 
   // ── R key: randomize all sound generation parameters ─────────────────────
 

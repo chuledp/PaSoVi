@@ -25,6 +25,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 const MAX_PLAYERS = 8;
 const rooms = new Map();
 
+// Admin key — set ADMIN_KEY env var in Railway to protect admin controls
+const ADMIN_KEY = process.env.ADMIN_KEY || '';
+
 const WORLD_TYPES = 6;
 const PALETTES = 8;
 
@@ -52,6 +55,9 @@ function generateWorldSeed() {
 
 io.on('connection', (socket) => {
   console.log('[+] Connected:', socket.id);
+  const adminKey = socket.handshake.query.adminKey || '';
+  socket.isAdmin = ADMIN_KEY !== '' && adminKey === ADMIN_KEY;
+  if (socket.isAdmin) console.log('[★] Admin connected:', socket.id);
 
   // Find room with space, or create new one
   let roomId = null;
@@ -75,6 +81,7 @@ io.on('connection', (socket) => {
   }
 
   const room = rooms.get(roomId);
+  const alias = (socket.handshake.query.alias || 'ANÓNIMO').slice(0, 16).toUpperCase();
 
   // Fresh world seed when room is empty (first arrival)
   if (room.players.size === 0) room.worldSeed = generateWorldSeed();
@@ -89,8 +96,9 @@ io.on('connection', (socket) => {
 
   const playerData = {
     id: socket.id,
-    index: playerIndex,   // visual index → color
-    synthIndex,           // audio synthesis profile (random, non-repeating)
+    index: playerIndex,
+    synthIndex,
+    alias,
     x: (Math.random() - 0.5) * 30,
     y: 3,
     z: (Math.random() - 0.5) * 30,
@@ -107,7 +115,8 @@ io.on('connection', (socket) => {
     playerIndex,       // visual color slot
     playerSynthIndex: synthIndex,  // audio synthesis profile
     worldSeed: room.worldSeed,
-    players: Array.from(room.players.values())
+    players: Array.from(room.players.values()),
+    isAdmin: socket.isAdmin
   });
 
   // Notify others
@@ -139,9 +148,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('requestNewWorld', () => {
+    if (!socket.isAdmin) return;
     room.worldSeed = generateWorldSeed();
     io.to(roomId).emit('newWorld', { worldSeed: room.worldSeed });
-    console.log(`[~] New world for room ${roomId}: type ${room.worldSeed.worldType}`);
+    console.log(`[★] Admin new world for room ${roomId}: type ${room.worldSeed.worldType}`);
+  });
+
+  socket.on('adminSetReverb', ({ param, value }) => {
+    if (!socket.isAdmin) return;
+    // Broadcast to everyone else in room — admin applies locally already
+    socket.to(roomId).emit('applyReverb', { param, value });
   });
 
   socket.on('disconnect', () => {
