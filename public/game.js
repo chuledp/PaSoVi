@@ -41,7 +41,6 @@ function startGame() {
   _initThree();
   _initInput();
   _initNetwork(alias, adminKey);
-  _initReverbPanel();
   _animate();
 }
 
@@ -185,6 +184,7 @@ function _initNetwork(alias, adminKey) {
     localPlayer = { id: data.playerId, index: data.playerIndex, synthIndex: data.playerSynthIndex };
     isAdmin = !!data.isAdmin;
     _applyAdminUI();
+    _initReverbPanel();
 
     // Spawn somewhere random
     camera.position.set(
